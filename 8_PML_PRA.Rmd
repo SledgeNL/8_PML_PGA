@@ -1,0 +1,229 @@
+---
+title: "JustDoIt"
+author: "Henriette Hamer"
+date: "13 september 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Barbell lifts: Did they perform the exercise correct, or not?
+
+## Executive Summary
+
+People can do exercises in the right and in a wrong way. Based on training data provided by 6 people wearing various accelormeters, performing over 3000 repetitions of a barbell lift, one right way and 4 wrong ways, a model was build to predict for 20 subjects how they performed the exercise based on the measurements of the accelerometers.
+
+RandomForest turned out to be the method of choice, outweighing boosted trees and linear discriminant analysis.
+
+The cross validation was done with 25% of the training data.
+
+Out of sample error is expected to be low, as the number of samples in the training- and validation set is high (14718 + 4904 = 19622)
+
+Result of the 20 tests:
+
+1 : B,
+2 : A,
+3 : B,
+4 : A,
+5 : A
+
+6 : E,
+7 : D,
+8 : B,
+9 : A,
+10 : A
+
+11 : B,
+12 : C,
+13 : B,
+14 : A,
+15 : E
+
+16 : E,
+17 : A,
+18 : B,
+19 : B,
+20 : B
+
+
+## Introduction
+
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.
+
+The goal of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. Subject that will be addressed are: 
+
+- description of how the model was build 
+- how cross validation was used 
+- the expected 'out of sample error'
+- explanation of the choices made
+
+## Background and Data
+
+### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+### Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+## Exploratory Data Analysis and Cleaning Up Data
+
+### Get the data
+
+```{r GetData, cache=TRUE}
+if(!file.exists("./data")){dir.create("./data")}
+
+## get the training data
+fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+if(!file.exists("./data/pml-training.csv")){
+        download.file(fileUrl,
+                destfile="./data/pml-training.csv")
+}
+training <- read.csv("./data/pml-training.csv", header=TRUE, stringsAsFactors=FALSE, dec=".")
+
+
+## get the test data
+fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+if(!file.exists("./data/pml-testing.csv")){
+        download.file(fileUrl,
+                destfile="./data/pml-testing.csv")
+}
+test  <- read.csv("./data/pml-testing.csv", header=TRUE, stringsAsFactors=FALSE, dec=".")
+```
+
+### Tidy up the data.
+
+The training dataset has `r dim(training)[1]` rows and `r dim(training)[2]` columns.
+
+The test dataset has `r dim(test)[1]` rows and `r dim(test)[2]` columns.
+
+
+The relevant data consists of the accelerometer measurements for belt, arm, dumbbell and forearm. These columns are selected, including the 'classe' column, as we're training to predict the classe. Names, dates, timestamps etc. are deemed not relevant. The columns that are not selected have few data or mainly NA's.
+
+```{r tidy_up}
+tidytraining <- training[, c("classe", 
+        "roll_belt", "pitch_belt", "yaw_belt", 
+        "gyros_belt_x", "accel_belt_x", "magnet_belt_x", 
+        "gyros_belt_y", "accel_belt_y", "magnet_belt_y", 
+        "gyros_belt_z", "accel_belt_z", "magnet_belt_z",
+        "roll_arm", "pitch_arm", "yaw_arm", 
+        "gyros_arm_x", "accel_arm_x", "magnet_arm_x", 
+        "gyros_arm_y", "accel_arm_y", "magnet_arm_y", 
+        "gyros_arm_z", "accel_arm_z", "magnet_arm_z", 
+        "roll_dumbbell", "pitch_dumbbell", "yaw_dumbbell", 
+        "gyros_dumbbell_x", "accel_dumbbell_x", "magnet_dumbbell_x", 
+        "gyros_dumbbell_y", "accel_dumbbell_y", "magnet_dumbbell_y", 
+        "gyros_dumbbell_z", "accel_dumbbell_z", "magnet_dumbbell_z", 
+        "roll_forearm", "pitch_forearm", "yaw_forearm", 
+        "gyros_forearm_x", "accel_forearm_x", "magnet_forearm_x", 
+        "gyros_forearm_y", "accel_forearm_y", "magnet_forearm_y", 
+        "gyros_forearm_z", "accel_forearm_z", "magnet_forearm_z")]
+```
+
+The dimension of the stripped dataset is `r dim(tidytraining)[1]` rows and `r dim(tidytraining)[2]` columns.
+
+## Load relevant libraries and set seed
+
+```{r libraries, message=FALSE}
+library(AppliedPredictiveModeling)
+library(caret)
+library(ElemStatLearn)
+library(pgmm)
+library(rpart)
+library(gbm)
+library(lubridate)
+library(forecast)
+library(e1071)
+library(kernlab)
+library(randomForest)
+set.seed(2138)
+```
+
+## Try various prediction models
+
+### Cross Validation
+
+First split tidytraining in finaltraining (75%) and finalvalidation (25%), in order to execute cross validation.
+
+```{r training_validation}
+inTrain = createDataPartition(y=tidytraining$classe, p = 0.75, list=FALSE)
+finaltraining = tidytraining[inTrain,]
+finalvalidation = tidytraining[-inTrain,]
+
+# make classe a factor
+finaltraining$classe <- as.factor(finaltraining$classe)
+finalvalidation$classe <- as.factor(finalvalidation$classe)
+```
+
+As the number of samples is reasonable high (14718 for the training data, 4904 for the validation data) the out of sample error is expected to be low.
+
+The idea is to compare randomForest, boosted trees and linear discriminant analysis. As the exploratory run for the boosted trees took a while and didn't give the highest accuracy, the actual execution is omitted in the final report.
+
+### Random Forest ("rf")
+
+
+```{r model_rf, cache=TRUE}
+model_rf <- randomForest(classe ~., data=finaltraining)
+result_rf <- predict(model_rf, finalvalidation)
+confusionMatrix(result_rf, finalvalidation$classe)
+```
+
+The accuracy is 99.59%.
+
+### Boosted Trees ("gbm") 
+
+this model took a long time to run, I ran it once, but as it's not the model of choice, I refrain from running it again in the html_knit process.
+
+```{r model_gbm, cache=TRUE}
+# model_gbm <- train(classe ~ ., data = finaltraining, method = "gbm")
+# result_gbm <- predict(model_gbm, finalvalidation)
+# confusionMatrix(result_gbm, finalvalidation$classe)
+```
+
+The accuracy is 95.84% (please believe my blue eyes) - high, but not high enough.
+
+### Linear Discriminant Analysis ("lda")
+
+```{r model_lda, cache=TRUE}
+model_lda <- train(classe ~ ., data = finaltraining, method = "lda")
+result_lda <- predict(model_lda, finalvalidation)
+confusionMatrix(result_lda, finalvalidation$classe)
+
+```
+
+The accuracy is 69.96%, not high enough for our purpose.
+
+As we aim for a high accuracy, we choose RandomForest for our final prediction model.
+
+## Prediction
+
+
+```{r real_test}
+result_rf_test <- predict(model_rf, test)
+result_rf_test
+```
+
+These results have been submitted in the final quiz.
+
+## Reproducibility
+
+Some information on (retrieval) date and the system used:
+
+```{r details}
+Sys.time()
+sessionInfo()
+```
+
